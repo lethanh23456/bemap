@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+
 @RestController
 @RequestMapping("/api/auth")
 @CrossOrigin(origins = "*")
@@ -54,4 +55,7 @@ public class AuthController {
         String token = jwtUtil.generateToken(found.getUsername());
         return ResponseEntity.ok(token);
     }
+
+
+
 }
