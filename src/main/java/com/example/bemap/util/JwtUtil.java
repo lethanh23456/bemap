@@ -18,23 +18,15 @@ public class JwtUtil {
     private final long ACCESS_TOKEN_EXPIRATION = 86400000;     // 1 ngày
     private final long REFRESH_TOKEN_EXPIRATION = 604800000;   // 7 ngày
 
-    // ==========================
-    // ACCESS TOKEN
-    // ==========================
     public String generateAccessToken(String username) {
         return generateToken(username, ACCESS_TOKEN_EXPIRATION);
     }
 
-    // ==========================
-    // REFRESH TOKEN
-    // ==========================
     public String generateRefreshToken(String username) {
         return generateToken(username, REFRESH_TOKEN_EXPIRATION);
     }
 
-    // ==========================
-    // COMMON TOKEN BUILDER
-    // ==========================
+
     private String generateToken(String username, long expiration) {
         try {
             JWSSigner signer = new MACSigner(SECRET_KEY.getBytes());
