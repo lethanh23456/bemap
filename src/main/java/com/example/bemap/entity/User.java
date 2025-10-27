@@ -2,6 +2,7 @@ package com.example.bemap.entity;
 
 
 import jakarta.persistence.*;
+import java.util.Date;
 
 @Entity
 @Table(name = "users")
@@ -20,6 +21,17 @@ public class User {
     @Column(nullable = false)
     private String password;
 
+    @Column(nullable = true)
+    private String otp;
+
+    @Column(nullable = true)
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date otpExpiry;
+
+    @Column(nullable = true)
+    private String recoveryCode;
+
+
 
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
@@ -29,6 +41,15 @@ public class User {
 
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
+
+    public String getOtp() { return otp; }
+    public void setOtp(String otp) { this.otp = otp; }
+
+    public Date getOtpExpiry() { return otpExpiry; }
+    public void setOtpExpiry(Date otpExpiry) { this.otpExpiry = otpExpiry; }
+
+    public String getRecoveryCode() { return recoveryCode; }
+    public void setRecoveryCode(String recoveryCode) { this.recoveryCode = recoveryCode; }
 
 
 }

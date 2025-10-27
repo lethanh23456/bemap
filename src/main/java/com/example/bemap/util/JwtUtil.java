@@ -26,6 +26,11 @@ public class JwtUtil {
         return generateToken(username, REFRESH_TOKEN_EXPIRATION);
     }
 
+    public String generateResetToken(String username) {
+        // Token reset password có thời hạn ngắn (15 phút)
+        return generateToken(username, 900000); // 15 minutes
+    }
+
 
     private String generateToken(String username, long expiration) {
         try {
