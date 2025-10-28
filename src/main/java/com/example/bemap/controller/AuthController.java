@@ -2,6 +2,7 @@ package com.example.bemap.controller;
 
 import com.example.bemap.entity.User;
 import com.example.bemap.service.UserService;
+import com.example.bemap.service.EmailService;
 import com.example.bemap.util.JwtUtil;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -17,19 +18,36 @@ public class AuthController {
 
     private final UserService userService;
     private final JwtUtil jwtUtil;
+    private final EmailService emailService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    public AuthController(UserService userService, JwtUtil jwtUtil) {
+    public AuthController(UserService userService, JwtUtil jwtUtil, EmailService emailService) {
         this.userService = userService;
         this.jwtUtil = jwtUtil;
+        this.emailService = emailService;
     }
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody User user) {
+        // Validate username
         if (userService.existsByUsername(user.getUsername())) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body("Username already exists");
+        }
+
+        // Validate email
+        if (user.getEmail() == null || user.getEmail().isEmpty()) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Email is required");
+        }
+
+        // Validate email format
+        if (!isValidEmail(user.getEmail())) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Invalid email format");
         }
 
         user.setPassword(passwordEncoder.encode(user.getPassword()));
@@ -72,7 +90,19 @@ public class AuthController {
         String oldPassword = request.get("oldPassword");
         String newPassword = request.get("newPassword");
 
+        if (oldPassword == null || newPassword == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Old password and new password are required");
+        }
+
         User user = userService.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body("User not found");
+        }
 
         if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
             return ResponseEntity
@@ -105,11 +135,16 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-
     @PostMapping("/forgot-password")
     public ResponseEntity<?> forgotPassword(@RequestBody Map<String, String> request) {
         String username = request.get("username");
         String email = request.get("email");
+
+        if (username == null || email == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Username and email are required");
+        }
 
         User user = userService.findByUsername(username);
 
@@ -136,23 +171,34 @@ public class AuthController {
         user.setOtpExpiry(cal.getTime());
         userService.saveUser(user);
 
-        // TODO: Gửi email thực tế
-        // emailService.sendOTP(user.getEmail(), otp);
+        // Gửi email thực tế
+        try {
+            emailService.sendOTP(user.getEmail(), otp);
+        } catch (Exception e) {
+            // Log error nhưng không trả về chi tiết lỗi cho user
+            System.err.println("Failed to send email: " + e.getMessage());
+            return ResponseEntity
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Failed to send email. Please try again later.");
+        }
 
         Map<String, String> response = new HashMap<>();
         response.put("message", "OTP has been sent to your email");
-        // CHỈ để test - trong production KHÔNG trả về OTP
-        response.put("otp", otp); // XÓA dòng này khi deploy thật
         response.put("expiresIn", "5 minutes");
 
         return ResponseEntity.ok(response);
     }
 
-
     @PostMapping("/verify-otp")
     public ResponseEntity<?> verifyOtp(@RequestBody Map<String, String> request) {
         String username = request.get("username");
         String otp = request.get("otp");
+
+        if (username == null || otp == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Username and OTP are required");
+        }
 
         User user = userService.findByUsername(username);
 
@@ -193,13 +239,18 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> request) {
         String resetToken = request.get("resetToken");
         String newPassword = request.get("newPassword");
 
-        if (resetToken == null || !jwtUtil.validateToken(resetToken)) {
+        if (resetToken == null || newPassword == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Reset token and new password are required");
+        }
+
+        if (!jwtUtil.validateToken(resetToken)) {
             return ResponseEntity
                     .status(HttpStatus.UNAUTHORIZED)
                     .body("Invalid or expired reset token");
@@ -222,6 +273,8 @@ public class AuthController {
     }
 
 
+
+    // phương thức mở rộng sau
     @GetMapping("/recovery-code")
     public ResponseEntity<?> getRecoveryCode(HttpServletRequest httpRequest) {
         String username = (String) httpRequest.getAttribute("username");
@@ -252,12 +305,17 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-
     @PostMapping("/reset-password-with-code")
     public ResponseEntity<?> resetPasswordWithCode(@RequestBody Map<String, String> request) {
         String username = request.get("username");
         String recoveryCode = request.get("recoveryCode");
         String newPassword = request.get("newPassword");
+
+        if (username == null || recoveryCode == null || newPassword == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Username, recovery code, and new password are required");
+        }
 
         User user = userService.findByUsername(username);
 
@@ -276,7 +334,7 @@ public class AuthController {
 
         // Cập nhật mật khẩu
         user.setPassword(passwordEncoder.encode(newPassword));
-        // Xóa recovery code sau khi sử dụng (hoặc giữ lại tùy yêu cầu)
+        // Xóa recovery code sau khi sử dụng
         user.setRecoveryCode(null);
         userService.saveUser(user);
 
@@ -286,12 +344,18 @@ public class AuthController {
     // Helper: Tạo OTP 6 số
     private String generateOTP() {
         Random random = new Random();
-        int otp = 100000 + random.nextInt(900000); // 6 chữ số
+        int otp = 100000 + random.nextInt(900000);
         return String.valueOf(otp);
     }
 
     // Helper: Tạo recovery code
     private String generateRecoveryCode() {
         return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+    }
+
+    // Helper: Validate email format
+    private boolean isValidEmail(String email) {
+        String emailRegex = "^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$";
+        return email.matches(emailRegex);
     }
 }
