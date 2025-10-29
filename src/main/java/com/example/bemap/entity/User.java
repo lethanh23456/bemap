@@ -1,6 +1,5 @@
 package com.example.bemap.entity;
 
-
 import jakarta.persistence.*;
 import java.util.Date;
 
@@ -28,10 +27,20 @@ public class User {
     @Temporal(TemporalType.TIMESTAMP)
     private Date otpExpiry;
 
+    // 2FA fields
+    @Column(nullable = false)
+    private boolean twoFactorEnabled = false;
+
     @Column(nullable = true)
-    private String recoveryCode;
+    private String twoFactorOtp;
 
+    @Column(nullable = true)
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date twoFactorOtpExpiry;
 
+    // Getters and Setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
@@ -48,8 +57,18 @@ public class User {
     public Date getOtpExpiry() { return otpExpiry; }
     public void setOtpExpiry(Date otpExpiry) { this.otpExpiry = otpExpiry; }
 
-    public String getRecoveryCode() { return recoveryCode; }
-    public void setRecoveryCode(String recoveryCode) { this.recoveryCode = recoveryCode; }
+    public boolean isTwoFactorEnabled() { return twoFactorEnabled; }
+    public void setTwoFactorEnabled(boolean twoFactorEnabled) {
+        this.twoFactorEnabled = twoFactorEnabled;
+    }
 
+    public String getTwoFactorOtp() { return twoFactorOtp; }
+    public void setTwoFactorOtp(String twoFactorOtp) {
+        this.twoFactorOtp = twoFactorOtp;
+    }
 
+    public Date getTwoFactorOtpExpiry() { return twoFactorOtpExpiry; }
+    public void setTwoFactorOtpExpiry(Date twoFactorOtpExpiry) {
+        this.twoFactorOtpExpiry = twoFactorOtpExpiry;
+    }
 }

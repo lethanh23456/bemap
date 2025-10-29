@@ -29,21 +29,18 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody User user) {
-        // Validate username
         if (userService.existsByUsername(user.getUsername())) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body("Username already exists");
         }
 
-        // Validate email
         if (user.getEmail() == null || user.getEmail().isEmpty()) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body("Email is required");
         }
 
-        // Validate email format
         if (!isValidEmail(user.getEmail())) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
@@ -66,6 +63,37 @@ public class AuthController {
                     .body("Invalid username or password");
         }
 
+        // Kiểm tra nếu user bật 2FA
+        if (found.isTwoFactorEnabled()) {
+            // Tạo OTP 6 số
+            String otp = generateOTP();
+
+            // Lưu OTP vào database (thời hạn 5 phút)
+            found.setTwoFactorOtp(otp);
+            Calendar cal = Calendar.getInstance();
+            cal.add(Calendar.MINUTE, 5);
+            found.setTwoFactorOtpExpiry(cal.getTime());
+            userService.saveUser(found);
+
+            // Gửi OTP qua email
+            try {
+                emailService.sendOTP(found.getEmail(), otp);
+            } catch (Exception e) {
+                System.err.println("Failed to send 2FA email: " + e.getMessage());
+                return ResponseEntity
+                        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("Failed to send 2FA code. Please try again later.");
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("requires2FA", true);
+            response.put("message", "2FA code has been sent to your email");
+            response.put("username", found.getUsername());
+
+            return ResponseEntity.ok(response);
+        }
+
+        // Nếu không bật 2FA, login bình thường
         String accessToken = jwtUtil.generateAccessToken(found.getUsername());
         String refreshToken = jwtUtil.generateRefreshToken(found.getUsername());
 
@@ -74,6 +102,159 @@ public class AuthController {
         tokens.put("refreshToken", refreshToken);
 
         return ResponseEntity.ok(tokens);
+    }
+
+    @PostMapping("/verify-2fa")
+    public ResponseEntity<?> verify2FA(@RequestBody Map<String, String> request) {
+        String username = request.get("username");
+        String otp = request.get("otp");
+
+        if (username == null || otp == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Username and OTP are required");
+        }
+
+        User user = userService.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body("User not found");
+        }
+
+        // Kiểm tra OTP 2FA
+        String storedOtp = user.getTwoFactorOtp();
+        Date otpExpiry = user.getTwoFactorOtpExpiry();
+
+        if (storedOtp == null || !storedOtp.equals(otp)) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Invalid 2FA code");
+        }
+
+        if (otpExpiry == null || otpExpiry.before(new Date())) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("2FA code expired");
+        }
+
+        // Xóa OTP sau khi verify thành công
+        user.setTwoFactorOtp(null);
+        user.setTwoFactorOtpExpiry(null);
+        userService.saveUser(user);
+
+        // Tạo token
+        String accessToken = jwtUtil.generateAccessToken(user.getUsername());
+        String refreshToken = jwtUtil.generateRefreshToken(user.getUsername());
+
+        Map<String, String> tokens = new HashMap<>();
+        tokens.put("accessToken", accessToken);
+        tokens.put("refreshToken", refreshToken);
+
+        return ResponseEntity.ok(tokens);
+    }
+
+    @PostMapping("/enable-2fa")
+    public ResponseEntity<?> enable2FA(HttpServletRequest httpRequest) {
+        String username = (String) httpRequest.getAttribute("username");
+
+        if (username == null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body("Unauthorized");
+        }
+
+        User user = userService.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body("User not found");
+        }
+
+        if (user.isTwoFactorEnabled()) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("2FA is already enabled");
+        }
+
+        user.setTwoFactorEnabled(true);
+        userService.saveUser(user);
+
+        return ResponseEntity.ok("2FA enabled successfully");
+    }
+
+    @PostMapping("/disable-2fa")
+    public ResponseEntity<?> disable2FA(@RequestBody Map<String, String> request,
+                                        HttpServletRequest httpRequest) {
+        String username = (String) httpRequest.getAttribute("username");
+
+        if (username == null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body("Unauthorized");
+        }
+
+        String password = request.get("password");
+
+        if (password == null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Password is required to disable 2FA");
+        }
+
+        User user = userService.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body("User not found");
+        }
+
+        if (!user.isTwoFactorEnabled()) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("2FA is not enabled");
+        }
+
+        // Xác thực mật khẩu trước khi tắt 2FA
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body("Incorrect password");
+        }
+
+        user.setTwoFactorEnabled(false);
+        user.setTwoFactorOtp(null);
+        user.setTwoFactorOtpExpiry(null);
+        userService.saveUser(user);
+
+        return ResponseEntity.ok("2FA disabled successfully");
+    }
+
+    @GetMapping("/2fa-status")
+    public ResponseEntity<?> get2FAStatus(HttpServletRequest httpRequest) {
+        String username = (String) httpRequest.getAttribute("username");
+
+        if (username == null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body("Unauthorized");
+        }
+
+        User user = userService.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body("User not found");
+        }
+
+        Map<String, Boolean> response = new HashMap<>();
+        response.put("twoFactorEnabled", user.isTwoFactorEnabled());
+
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/change-password")
@@ -154,28 +335,23 @@ public class AuthController {
                     .body("User not found");
         }
 
-        // Kiểm tra email có khớp không
         if (user.getEmail() == null || !user.getEmail().equals(email)) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body("Email does not match");
         }
 
-        // Tạo OTP 6 số
         String otp = generateOTP();
 
-        // Lưu OTP vào database (có thời hạn 5 phút)
         user.setOtp(otp);
         Calendar cal = Calendar.getInstance();
         cal.add(Calendar.MINUTE, 5);
         user.setOtpExpiry(cal.getTime());
         userService.saveUser(user);
 
-        // Gửi email thực tế
         try {
             emailService.sendOTP(user.getEmail(), otp);
         } catch (Exception e) {
-            // Log error nhưng không trả về chi tiết lỗi cho user
             System.err.println("Failed to send email: " + e.getMessage());
             return ResponseEntity
                     .status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -208,7 +384,6 @@ public class AuthController {
                     .body("User not found");
         }
 
-        // Kiểm tra OTP
         String storedOtp = user.getOtp();
         Date otpExpiry = user.getOtpExpiry();
 
@@ -224,10 +399,8 @@ public class AuthController {
                     .body("OTP expired");
         }
 
-        // Tạo reset token sau khi verify OTP thành công
         String resetToken = jwtUtil.generateResetToken(username);
 
-        // Xóa OTP sau khi verify
         user.setOtp(null);
         user.setOtpExpiry(null);
         userService.saveUser(user);
@@ -265,95 +438,19 @@ public class AuthController {
                     .body("User not found");
         }
 
-        // Cập nhật mật khẩu mới
         user.setPassword(passwordEncoder.encode(newPassword));
         userService.saveUser(user);
 
         return ResponseEntity.ok("Password reset successfully");
     }
 
-
-
-    // phương thức mở rộng sau
-    @GetMapping("/recovery-code")
-    public ResponseEntity<?> getRecoveryCode(HttpServletRequest httpRequest) {
-        String username = (String) httpRequest.getAttribute("username");
-
-        if (username == null) {
-            return ResponseEntity
-                    .status(HttpStatus.UNAUTHORIZED)
-                    .body("Unauthorized");
-        }
-
-        User user = userService.findByUsername(username);
-
-        if (user == null) {
-            return ResponseEntity
-                    .status(HttpStatus.NOT_FOUND)
-                    .body("User not found");
-        }
-
-        // Tạo recovery code mới
-        String recoveryCode = generateRecoveryCode();
-        user.setRecoveryCode(recoveryCode);
-        userService.saveUser(user);
-
-        Map<String, String> response = new HashMap<>();
-        response.put("recoveryCode", recoveryCode);
-        response.put("message", "Save this code in a safe place");
-
-        return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/reset-password-with-code")
-    public ResponseEntity<?> resetPasswordWithCode(@RequestBody Map<String, String> request) {
-        String username = request.get("username");
-        String recoveryCode = request.get("recoveryCode");
-        String newPassword = request.get("newPassword");
-
-        if (username == null || recoveryCode == null || newPassword == null) {
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body("Username, recovery code, and new password are required");
-        }
-
-        User user = userService.findByUsername(username);
-
-        if (user == null) {
-            return ResponseEntity
-                    .status(HttpStatus.NOT_FOUND)
-                    .body("User not found");
-        }
-
-        // Kiểm tra recovery code
-        if (user.getRecoveryCode() == null || !user.getRecoveryCode().equals(recoveryCode)) {
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body("Invalid recovery code");
-        }
-
-        // Cập nhật mật khẩu
-        user.setPassword(passwordEncoder.encode(newPassword));
-        // Xóa recovery code sau khi sử dụng
-        user.setRecoveryCode(null);
-        userService.saveUser(user);
-
-        return ResponseEntity.ok("Password reset successfully with recovery code");
-    }
-
-    // Helper: Tạo OTP 6 số
+    // Helper methods
     private String generateOTP() {
         Random random = new Random();
         int otp = 100000 + random.nextInt(900000);
         return String.valueOf(otp);
     }
 
-    // Helper: Tạo recovery code
-    private String generateRecoveryCode() {
-        return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-    }
-
-    // Helper: Validate email format
     private boolean isValidEmail(String email) {
         String emailRegex = "^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$";
         return email.matches(emailRegex);

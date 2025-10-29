@@ -13,7 +13,10 @@ public class FilterConfig {
         registrationBean.setFilter(jwtFilter);
         registrationBean.addUrlPatterns("/api/user/*",
                                         "/api/auth/change-password",
-                                        "/api/auth/recovery-code");
+                                        "/api/auth/enable-2fa",
+                                        "/api/auth/disable-2fa",
+                                        "/api/auth/2fa-status"
+                                        );
         return registrationBean;
     }
 }

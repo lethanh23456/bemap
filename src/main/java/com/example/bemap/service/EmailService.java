@@ -15,7 +15,7 @@ public class EmailService {
 
     public void sendOTP(String toEmail, String otp) {
         SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom("your-email@gmail.com"); // Thay bằng email của bạn
+
         message.setTo(toEmail);
         message.setSubject("Your OTP Code - BeMap");
         message.setText(
